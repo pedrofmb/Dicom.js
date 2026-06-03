@@ -144,6 +144,13 @@ namespace Efferent
                 else if ((this.modality === "MG" || this.modality === "DX") && this.bitsAllocated === 16)
                     element.VR = "OW";
             }
+            else if (this.transferSyntax === "1.2.840.10008.1.2.4.50" && element.tag === "7FE0_0010")
+            {
+                if (element.VR === "OW" && this.bitsAllocated === 8 && (this.modality === "XA" || this.modality === "RF" || this.modality === "US"))
+                {
+                    element.VR = "OB";
+                }
+            }
         }
 
         private readElementValue(element: DicomElement): void
