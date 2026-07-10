@@ -85,11 +85,12 @@
                 const TAG = Efferent.DICOM_TAG;
                 const tags = parser.DicomTags || {};
                 const pick = (tag) => tags[tag] ?? '(missing)';
+                const transferSyntaxDisplay = tags[TAG.TRANSFER_SYNTAX_UID] ?? (parser.transferSyntax ? `${parser.transferSyntax} (inferred, not declared in file)` : '(missing)');
 
                 const lines = [
                     `Study Date:           ${pick(TAG.STUDY_DATE)}`,
                     `Modality:             ${pick(TAG.MODALITY)}`,
-                    `Transfer Syntax UID:  ${pick(TAG.TRANSFER_SYNTAX_UID)}`,
+                    `Transfer Syntax UID:  ${transferSyntaxDisplay}`,
                     `Patient ID:           ${pick(TAG.PATIENT_ID)}`,
                     `Patient Name:         ${pick(TAG.PATIENT_NAME)}`,
                     `Rows x Cols:          ${pick(TAG.ROWS)} x ${pick(TAG.COLUMNS)}`,
@@ -106,7 +107,7 @@
             function tryRenderPreview(parser, canvas) {
                 const TAG = Efferent.DICOM_TAG;
 
-                const transferSyntax = String(parser.DicomTags?.[TAG.TRANSFER_SYNTAX_UID] || '');
+                const transferSyntax = String(parser.DicomTags?.[TAG.TRANSFER_SYNTAX_UID] || parser.transferSyntax || '');
 
                 const rows = Number(parser.DicomTags?.[TAG.ROWS] || 0);
                 const cols = Number(parser.DicomTags?.[TAG.COLUMNS] || 0);
@@ -149,8 +150,8 @@
                 const imageData = ctx.createImageData(cols, rows);
                 const dst = imageData.data;
 
-                // Very basic renderer for 8-bit grayscale or RGB samples
                 if (bits === 8 && img instanceof Uint8Array) {
+                    // Basic renderer for 8-bit grayscale or RGB samples
                     if (photometric === 'RGB' && img.length >= rows * cols * 3) {
                         // Interleaved RGB
                         for (let i = 0, j = 0; i < rows * cols; i++, j += 4) {
@@ -163,6 +164,41 @@
                             const v = img[i];
                             dst[j + 0] = v; dst[j + 1] = v; dst[j + 2] = v; dst[j + 3] = 255;
                         }
+                    }
+                    ctx.putImageData(imageData, 0, 0);
+                } else if (bits === 16 && (img instanceof Uint16Array || img instanceof Int16Array) && img.length >= rows * cols) {
+                    // 16-bit grayscale (e.g. CT/MR): apply rescale + windowing to map to 0-255
+                    const slope = parseFloat(String(parser.DicomTags?.[TAG.RESCALE_SLOPE] ?? '1')) || 1;
+                    const intercept = parseFloat(String(parser.DicomTags?.[TAG.RESCALE_INTERCEPT] ?? '0')) || 0;
+
+                    const firstValue = (raw) => parseFloat(String(raw ?? '').split('\\')[0]);
+                    let center = firstValue(parser.DicomTags?.[TAG.WINDOW_CENTER]);
+                    let width = firstValue(parser.DicomTags?.[TAG.WINDOW_WIDTH]);
+
+                    let low, high;
+
+                    if (Number.isFinite(center) && Number.isFinite(width) && width > 0) {
+                        low = center - width / 2;
+                        high = center + width / 2;
+                    } else {
+                        // No window info: fall back to actual min/max of the rescaled data
+                        low = Infinity;
+                        high = -Infinity;
+                        for (let i = 0; i < rows * cols; i++) {
+                            const real = img[i] * slope + intercept;
+                            if (real < low) low = real;
+                            if (real > high) high = real;
+                        }
+                        if (!(high > low)) { low = 0; high = 1; }
+                    }
+
+                    const range = (high - low) || 1;
+
+                    for (let i = 0, j = 0; i < rows * cols; i++, j += 4) {
+                        const real = img[i] * slope + intercept;
+                        let v = ((real - low) / range) * 255;
+                        v = v < 0 ? 0 : (v > 255 ? 255 : v);
+                        dst[j + 0] = v; dst[j + 1] = v; dst[j + 2] = v; dst[j + 3] = 255;
                     }
                     ctx.putImageData(imageData, 0, 0);
                 } else {

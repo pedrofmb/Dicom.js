@@ -28,7 +28,7 @@ const u8 = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 
 const parser = new DicomReader(u8, /*debug*/ false);
 const tags = parser.DicomTags || {};
-const transferSyntax = String(tags[TAG.TRANSFER_SYNTAX_UID] || '');
+const transferSyntax = String(tags[TAG.TRANSFER_SYNTAX_UID] || parser.transferSyntax || '');
 
 // Map common DICOM transfer syntaxes to well-known exportable formats
 const EXPORT_FORMATS = {

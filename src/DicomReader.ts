@@ -47,14 +47,28 @@ namespace Efferent
             if (this.fileSize < 140)
                 return;
 
-            if (
-                buffer[128] !== 0x44 || // 'D'
-                buffer[129] !== 0x49 || // 'I'
-                buffer[130] !== 0x43 || // 'C'
-                buffer[131] !== 0x4D    // 'M'
-            ) return;
+            const hasPreamble: boolean = (
+                buffer[128] === 0x44 && // 'D'
+                buffer[129] === 0x49 && // 'I'
+                buffer[130] === 0x43 && // 'C'
+                buffer[131] === 0x4D    // 'M'
+            );
 
-            this.position = 132;
+            if (hasPreamble)
+            {
+                this.position = 132;
+            }
+            else
+            {
+                this.position = 0;
+                this.headerSize = 0;
+                this.implicitVR = true;
+
+                this.transferSyntax = "1.2.840.10008.1.2.1";
+
+                if (this.isDebug)
+                    console.warn("DICM preamble not found. Falling back to headerless Implicit VR LE parsing (reported as Explicit VR LE for viewer compatibility).");
+            }
 
             let element: DicomElement;
 
@@ -172,6 +186,29 @@ namespace Efferent
                 {
                     element.value = [];
                     this.processSequence(element);
+                }
+                else if (element.tag === DICOM_TAG.PIXEL_DATA)
+                {
+                    if (this.bitsAllocated === 8)
+                    {
+                        element.value = new Uint8Array(this.bufferSlice(position, position + element.VL));
+                    }
+                    else
+                    {
+                        try
+                        {
+                            if (this.isUnsigned)
+                                element.value = new Uint16Array(this.bufferSlice(position, position + element.VL));
+                            else
+                                element.value = new Int16Array(this.bufferSlice(position, position + element.VL));
+                        }
+                        catch (err)
+                        {
+                            element.value = "";
+                        }
+                    }
+
+                    this.position += element.VL;
                 }
                 else if (element.VL > 1024)
                 {
@@ -383,9 +420,6 @@ namespace Efferent
             {
                 this.reachedPixelData = true;
 
-                if (this.implicitVR)  // Parsing of image is not supported for Implicit VR
-                    return;
-    
                 this.image = element.value;
 
                 if (!isSequence && this.image)
